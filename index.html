@@ -477,6 +477,23 @@ var DATA = {
   }
 };
 
+// Расходы маркетинга — разбивка по каналам (источник: лист «Сводный», строки 205-222).
+// Это отдельное измерение (канал, не юнит) — компания целиком, Авито разбита по брендам,
+// остальные каналы (Директ/ВК/Блогеры/Инструменты/Прочее) не делятся на Вейсан/Снисенг в источнике.
+var CHANNELS = [
+  {key:'direct',        label:'Директ',           color:'#2F6FA6'},
+  {key:'avito_weisan',  label:'Авито Вейсан',      color:'#3F9B7A'},
+  {key:'avito_sniseng', label:'Авито Снисенг',     color:'#8B5FA8'},
+  {key:'vk',            label:'ВК Таргет',         color:'#C97A3D'},
+  {key:'bloggers',      label:'Блогеры',           color:'#B24A2E'},
+  {key:'tools',         label:'Инструменты',       color:'#6B7280'},
+  {key:'other',         label:'Прочее',            color:'#D4A24F'}
+];
+var CHANNEL_DATA = {
+  '2026-05': {direct:1333889, avito_weisan:247919, avito_sniseng:196822, vk:137709, bloggers:205358, tools:81600, other:318000},
+  '2026-06': {direct:1485728, avito_weisan:202136, avito_sniseng:135076, vk:57627,  bloggers:569356, tools:59040, other:575516}
+};
+
 var SNAPSHOT_DATE = '08.07.2026';
 Chart.register(valueLabelPlugin);
 
@@ -710,7 +727,10 @@ function renderTabs(){
     var section = document.createElement('section');
     section.className = 'tabpanel' + (gi===0 ? ' active' : '');
     section.id = 'section-'+g.key;
-    g.metrics.forEach(function(mk){ section.appendChild(buildMetricCard(mk)); });
+    g.metrics.forEach(function(mk){
+      section.appendChild(buildMetricCard(mk));
+      if(mk === 'cost_mkt') section.appendChild(buildChannelCard());
+    });
     panelsBox.appendChild(section);
 
     var btn = document.createElement('button');
@@ -743,6 +763,107 @@ function buildMetricCard(metricKey){
   return card;
 }
 
+function buildChannelCard(){
+  var card = document.createElement('div');
+  card.className = 'metric';
+  card._isChannelCard = true;
+  card.innerHTML =
+    '<div class="metric-head"><h3>Расходы маркетинга — по каналам</h3><span class="fmt-tag">РУБ</span></div>' +
+    '<details class="info"><summary>что это и как считается</summary><p>Из чего складывается строка «Расходы маркетинга» выше: Директ, Авито по брендам, ВК, Блогеры, Инструменты/сервисы, Прочее (полиграфия, выставки). Показывает, какой именно канал разогнал или снизил расходы — а не только итоговую сумму. Каналы, кроме Авито, не делятся по брендам в источнике — это расходы компании целиком.</p></details>' +
+    '<div class="chart-box" style="height:240px"><canvas></canvas></div>' +
+    '<p class="metric-insight"></p>' +
+    '<div class="tablewrap"><table class="data"></table></div>';
+  return card;
+}
+
+function renderChannelCard(){
+  var cards = document.querySelectorAll('.metric');
+  var card = null;
+  cards.forEach(function(c){ if(c._isChannelCard) card = c; });
+  if(!card) return;
+
+  var periods = selectedPeriodsSorted();
+  var css = getComputedStyle(document.documentElement);
+  var gridColor = css.getPropertyValue('--steel-soft').trim();
+  var tickColor = css.getPropertyValue('--ink-soft').trim();
+
+  var canvas = card.querySelector('canvas');
+  var channelLabels = CHANNELS.map(function(c){ return c.label; });
+  var datasets = periods.map(function(p, pi){
+    var col = periodColor(pi);
+    return {
+      label: p.label,
+      data: CHANNELS.map(function(c){ return CHANNEL_DATA[p.key][c.key]; }),
+      backgroundColor: hexToRgba(col, 0.85),
+      borderColor: col,
+      borderWidth: 1,
+      borderRadius: 3,
+      maxBarThickness: 40
+    };
+  });
+  var chart = new Chart(canvas.getContext('2d'), {
+    type:'bar',
+    data:{ labels: channelLabels, datasets: datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ top:22 } },
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display: periods.length>1, position:'bottom', labels:{ color:tickColor, boxWidth:10, boxHeight:10, usePointStyle:true, font:{family:"'PT Sans',sans-serif", size:11.5} } },
+        tooltip:{ callbacks:{ label:function(ctx){ return ctx.dataset.label+': '+fmtCurrency(ctx.parsed.y); } } }
+      },
+      scales:{
+        x:{ ticks:{ color:tickColor, font:{family:"'PT Sans',sans-serif", size:10.5} }, grid:{ display:false } },
+        y:{ ticks:{ color:tickColor, font:{family:"'IBM Plex Mono',monospace", size:10.5}, callback:function(v){ return fmtCurrency(v); } }, grid:{ color:gridColor } }
+      }
+    }
+  });
+  chartLabelConfig.set(chart, { color: tickColor, formatter:function(v){ return fmtCurrency(v); } });
+  chartInstances.push(chart);
+
+  // insight — rank channels by absolute ₽ contribution to the change
+  var insightEl = card.querySelector('.metric-insight');
+  if(periods.length < 2){
+    insightEl.innerHTML = 'Отметьте 2 или более периодов вверху, чтобы увидеть, какой канал разогнал расходы.';
+  } else {
+    var first = periods[0], last = periods[periods.length-1];
+    var moves = CHANNELS.map(function(c){
+      var f = CHANNEL_DATA[first.key][c.key], l = CHANNEL_DATA[last.key][c.key];
+      return { c:c, f:f, l:l, abs: l-f, pct: deltaPct(f,l) };
+    });
+    var risers = moves.filter(function(m){ return m.abs>0; }).sort(function(a,b){ return b.abs-a.abs; });
+    var fallers = moves.filter(function(m){ return m.abs<0; }).sort(function(a,b){ return a.abs-b.abs; });
+    var parts = [];
+    if(risers.length){
+      parts.push('больше всего разогнали расходы: ' + risers.slice(0,2).map(function(m){
+        return '<b>'+m.c.label+'</b> ('+deltaLabel(m.pct)+', +'+fmtCurrency(m.abs)+')';
+      }).join(', ') + '.');
+    }
+    if(fallers.length){
+      parts.push('сильнее всего снизились: ' + fallers.slice(0,2).map(function(m){
+        return '<b>'+m.c.label+'</b> ('+deltaLabel(m.pct)+')';
+      }).join(', ') + '.');
+    }
+    insightEl.innerHTML = parts.join(' ') || 'Существенных изменений по каналам нет.';
+  }
+
+  // table
+  var table = card.querySelector('table.data');
+  var showDelta = periods.length > 1;
+  var thead = '<thead><tr><th>Канал</th>' + periods.map(function(p){return '<th>'+p.label+'</th>';}).join('') + (showDelta ? '<th>Δ</th>' : '') + '</tr></thead>';
+  var rows = CHANNELS.map(function(c){
+    var vals = periods.map(function(p){ return CHANNEL_DATA[p.key][c.key]; });
+    var d = showDelta ? deltaPct(vals[0], vals[vals.length-1]) : null;
+    var dcls = deltaClass(d, 'up-bad');
+    return '<tr>' +
+      '<td class="unit-name"><span class="swatch" style="background:'+c.color+'"></span>'+c.label+'</td>' +
+      vals.map(function(v){ return '<td>'+fmtCurrency(v)+'</td>'; }).join('') +
+      (showDelta ? '<td class="delta-cell '+dcls+'">'+deltaLabel(d)+'</td>' : '') +
+      '</tr>';
+  }).join('');
+  table.innerHTML = thead + '<tbody>'+rows+'</tbody>';
+}
+
 function unitsWithData(metricKey, periods){
   return UNITS.filter(function(u){
     return periods.some(function(p){
@@ -759,6 +880,7 @@ function renderMetricCards(){
 
   var cards = document.querySelectorAll('.metric');
   cards.forEach(function(card){
+    if(card._isChannelCard) return;
     var metricKey = card._metricKey;
     var m = METRICS[metricKey];
     var units = unitsWithData(metricKey, periods);
@@ -834,6 +956,8 @@ function renderMetricCards(){
     }).join('');
     table.innerHTML = thead + '<tbody>'+rows+'</tbody>';
   });
+
+  renderChannelCard();
 }
 
 function renderAll(){
