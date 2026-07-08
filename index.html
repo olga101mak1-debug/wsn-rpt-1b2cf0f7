@@ -69,7 +69,7 @@
 }
 
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
+html,body{margin:0;padding:0;overflow-x:hidden;}
 body{
   background:var(--paper);
   color:var(--ink);
@@ -158,10 +158,10 @@ header.deck{
 .insights li .b{color:var(--bad);font-weight:700;}
 
 /* ---- Tabs ---- */
-.tabbar{display:flex;gap:2px;margin:32px 0 0;border-bottom:1px solid var(--line);}
+.tabbar{display:flex;flex-wrap:wrap;gap:4px 18px;margin:32px 0 0;border-bottom:1px solid var(--line);}
 .tabbtn{
   background:none;border:none;border-bottom:2px solid transparent;
-  padding:10px 4px;margin-right:22px;font-size:14px;font-weight:600;color:var(--steel);
+  padding:10px 4px;font-size:14px;font-weight:600;color:var(--steel);
   cursor:pointer;
 }
 .tabbtn.active{color:var(--ink);border-bottom-color:var(--brass);}
